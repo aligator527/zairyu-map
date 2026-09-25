@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { aggregate, dataLevel, loadBlock, loadMeta, maskOf, totalFor, type Block, type Filters, type Level, type Meta, type View } from './lib/data';
+  import { aggregate, dataLevel, loadBlock, loadMeta, maskOf, totalFor, type Block, type Filters, type Level, type Meta, type Office, type View } from './lib/data';
   import { BUREAUS, branchOfPref, bureauCode, bureauOfPref } from './lib/bureaus';
   import { loadGeo, type GeoData } from './lib/geo';
   import { app, type Theme } from './lib/state.svelte';
@@ -184,6 +184,35 @@
       ? aggregate(prefPrevBlock, filters, 100, app.pref ? prefMask([app.pref]) : null) : null;
   });
 
+  // ------------------------------------------------------------ immigration office
+  const selectedOffice = $derived(meta?.offices.find((o) => o.id === app.office) ?? null);
+  let officeMuniBlock = $state.raw<Block | null>(null);
+  $effect(() => {
+    const o = selectedOffice, p = app.period;
+    if (!meta || !o || !o.munis.length || !meta.periods.muni.includes(p)) { officeMuniBlock = null; return; }
+    let alive = true;
+    loadBlock('muni', p).then((b) => { if (alive) officeMuniBlock = b; }).catch(() => {});
+    return () => { alive = false; };
+  });
+  /** foreign residents (matching the filters) in the office's service area */
+  const officeStats = $derived.by(() => {
+    const o = selectedOffice;
+    if (!meta || !o || o.kind === 'inspection' || !prefBlock || prefBlock.period !== app.period) return null;
+    let total = o.prefs.length ? aggregate(prefBlock, filters, 100, prefMask(o.prefs)).total : 0;
+    let hidden = 0, pop = o.prefs.reduce((s, p) => s + (meta!.population.pref[app.period]?.[p] ?? NaN), 0);
+    let muniMissing = false;
+    if (o.munis.length) {
+      const idx = o.munis.map((c) => muniIdx.get(c) ?? 0).filter(Boolean);
+      if (officeMuniBlock && officeMuniBlock.period === app.period) {
+        const a = aggregate(officeMuniBlock, filters, (meta.muni.length ?? 0) + 2, maskOf(meta.muni.length + 2, idx));
+        total += a.total; hidden = a.totalHidden;
+        pop += idx.reduce((s, i) => s + (meta!.population.muni[app.period]?.[i] ?? NaN), 0);
+      } else muniMissing = true;
+    }
+    return { total, hidden, pop: muniMissing ? NaN : pop, muniMissing };
+  });
+  function pickOffice(id: number) { app.office = app.office === id ? 0 : id; }
+
   const pooledPeriod = $derived(app.level === 'muni' && (app.period === '2023-12' || app.period === '2024-06'));
 
   const areas = $derived.by((): Area[] => {
@@ -307,17 +336,21 @@
 
   const places = $derived.by(() => {
     if (!meta) return [];
-    type Place = { code: string; name: string; alt: string; parent: string; kind: 'pref' | 'muni' | 'bureau' };
+    type Place = { code: string; name: string; alt: string; parent: string; kind: 'pref' | 'muni' | 'bureau' | 'office' };
     const list: Place[] = BUREAUS.map((b) => ({ code: bureauCode(b.id), name: b[L], alt: L === 'ja' ? b.en : b.ja, parent: '', kind: 'bureau' }));
     list.push(...meta.pref.filter((p) => Number(p.code) <= 47)
       .map((p): Place => ({ code: p.code, name: p[L], alt: p[L === 'ja' ? 'en' : 'ja'], parent: '', kind: 'pref' })));
+    for (const o of meta.offices) {
+      list.push({ code: String(o.id), name: o[L], alt: L === 'ja' ? o.en : o.ja, parent: tt(`officeKind_${o.kind}`), kind: 'office' });
+    }
     for (const m of meta.muni) {
       if (!m.geo) continue;
       list.push({ code: m.code, name: m[L], alt: m[L === 'ja' ? 'en' : 'ja'], parent: prefName(Number(m.pref)), kind: 'muni' });
     }
     return list;
   });
-  function pickPlace(p: { code: string; kind: 'pref' | 'muni' | 'bureau' }) {
+  function pickPlace(p: { code: string; kind: 'pref' | 'muni' | 'bureau' | 'office' }) {
+    if (p.kind === 'office') { app.office = Number(p.code); return; }
     if (p.kind === 'muni' && app.level !== 'muni') setLevel('muni');
     if (p.kind === 'bureau' && app.level !== 'bureau') setLevel('bureau');
     if (p.kind === 'pref' && app.level === 'bureau') setLevel('pref');
@@ -486,6 +519,13 @@
                 <li><button type="button" class="chip" onclick={() => goPref(p)}>{prefName(p)}{#if br}<small>{br[L]}</small>{/if}</button></li>
               {/each}
             </ul>
+            <span class="lbl">{tt('offices')}</span>
+            <ul class="chips">
+              {#each meta.offices.filter((o) => o.bureau === bu.id) as o (o.id)}
+                <li><button type="button" class="chip" class:inspection={o.kind === 'inspection'} aria-pressed={app.office === o.id}
+                  onclick={() => pickOffice(o.id)}>{L === 'ja' ? o.ja : o.en.replace(/ (Regional Immigration Services Bureau|District Office|Branch Office)$/, '')}</button></li>
+              {/each}
+            </ul>
           </div>
         {:else if app.level !== 'bureau' && app.pref}
           {@const br = branchOfPref(app.pref)}
@@ -526,6 +566,47 @@
             {/if}
           </p>
         {/if}
+        {#if selectedOffice}
+          {@const o = selectedOffice}
+          <div class="office" role="region" aria-label={o[L]}>
+            <div class="office-head">
+              <div>
+                <p class="lbl">{tt(`officeKind_${o.kind}`)} · {BUREAUS[o.bureau - 1][L]}</p>
+                <h3>{o[L]}</h3>
+                <p class="muted small">{L === 'ja' ? o.en : o.ja}</p>
+              </div>
+              <button type="button" class="btn ghost close" aria-label={tt('close')} onclick={() => (app.office = 0)}>
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.6" /></svg>
+              </button>
+            </div>
+            {#if o.address}<p class="small"><span class="lbl">{tt('address')}</span> {o.address}</p>{/if}
+            {#if o.kind === 'inspection'}
+              <p class="small muted">{tt('inspectionNote')}</p>
+            {:else}
+              <span class="lbl">{tt('serviceArea')}</span>
+              <ul class="chips">
+                {#each o.prefs as p (p)}
+                  <li><button type="button" class="chip" onclick={() => goPref(p)}>{prefName(p)}</button></li>
+                {/each}
+                {#each o.munis as c (c)}
+                  {@const m = meta.muni[(muniIdx.get(c) ?? 1) - 1]}
+                  <li><button type="button" class="chip" onclick={() => pickPlace({ code: c, kind: 'muni' })}>{m?.[L]}<small>{prefName(Number(m?.pref))}</small></button></li>
+                {/each}
+              </ul>
+              {#if officeStats}
+                <p class="office-num">
+                  <span class="lbl">{tt('residentsInArea')}{hasFilters ? ` · ${tt('matching')}` : ''}</span>
+                  <strong class="tnum">{fmtInt(L, officeStats.total)}</strong>{L === 'ja' ? '人' : ''}
+                  {#if officeStats.pop > 0}
+                    <span class="muted small">· {L === 'ja' ? `${tt('per1000Long')} ${fmtRate(L, (officeStats.total / officeStats.pop) * 1000)}人` : `${fmtRate(L, (officeStats.total / officeStats.pop) * 1000)} ${tt('per1000Long')}`}</span>
+                  {/if}
+                </p>
+                {#if officeStats.hidden > 0}<p class="small muted">+{fmtInt(L, officeStats.hidden)} {tt('partial')}</p>{/if}
+                {#if officeStats.muniMissing}<p class="small muted">{tt('areaMuniMissing')}</p>{/if}
+              {/if}
+            {/if}
+          </div>
+        {/if}
       </section>
 
       <section class="mapcol" aria-label={tt('map')}>
@@ -552,7 +633,8 @@
             <MapView {geo} level={app.level} areas={areaMap} {classes} metric={app.metric} lang={L}
               {focusCode}
               zoomTo={app.level === 'muni' && app.pref ? prefCode(app.pref) : null}
-              {highlight} onselect={select} showBureaus={app.showBureaus} />
+              {highlight} onselect={select} showBureaus={app.showBureaus}
+              offices={meta.offices} office={selectedOffice} onoffice={pickOffice} />
             <div class="legend-box">
               <Legend {classes} metric={app.metric} lang={L} level={app.level}
                 showHidden={app.level === 'muni'} bind:highlight />
@@ -574,6 +656,7 @@
           {#if app.level === 'muni' && app.period === '2023-12'}<p>{tt('hamamatsuNote')}</p>{/if}
           {#if app.level !== 'muni'}<p>{tt('legendNote')}</p>{/if}
           {#if app.level === 'bureau' || app.showBureaus}<p>{tt('bureauNote')}</p>{/if}
+          {#if selectedOffice || app.level === 'bureau' || app.showBureaus}<p>{tt('officeNote')}</p>{/if}
           {#if app.metric === 'per1000'}<p>{tt('popNote')}</p>{/if}
         </div>
 
@@ -682,6 +765,20 @@
   }
   .chip:hover { border-color: var(--ink-2); }
   .chip small { color: var(--muted); font-size: 11px; }
+  .chip[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); }
+  .chip.inspection { color: var(--muted); border-style: dotted; }
+  .office {
+    margin-top: 16px; padding: 12px 14px; border: 1px solid var(--line-strong); border-left: 3px solid var(--accent);
+    border-radius: 8px; background: var(--surface); display: grid; gap: 6px;
+  }
+  .office-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+  .office h3 { margin: 2px 0 0; font-size: 16px; }
+  .office .lbl { font-size: 12px; color: var(--muted); margin: 0; }
+  .office p { margin: 0; }
+  .office .close { min-height: 32px; padding: 0 8px; }
+  .office-num { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .office-num .lbl { width: 100%; }
+  .office-num strong { font-size: 22px; font-weight: 600; }
   .toggle { min-height: 38px; font-size: 13.5px; }
   .toggle[aria-pressed='true'] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 0; font-size: 13.5px; color: var(--ink-2); }

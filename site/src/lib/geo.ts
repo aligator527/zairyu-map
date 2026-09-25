@@ -31,8 +31,8 @@ export interface GeoData {
   bureaus: Shape[];
   bureauBorders: string;   // between bureaus
   branchBorders: string;   // around the prefectures of 支局 (Kanagawa, Hyogo, Okinawa)
-  /** office markers: bureau head offices and district offices */
-  offices: { id: number; branch: boolean; ja: string; en: string; x: number; y: number }[];
+  /** outline of a set of prefectures + municipalities (an office's service area) */
+  areaPath: (prefs: number[], munis: string[]) => string;
 }
 
 type Meta = {
@@ -105,16 +105,15 @@ export async function loadGeo(mergeSpec: Record<string, string[]>): Promise<GeoD
   const branchBorders = path(mesh(topo, prefObj as never, (a, b) =>
     a !== b && prefBureau(a) === prefBureau(b) &&
     (branchPrefs.has(Number(a.id)) || branchPrefs.has(Number(b.id))))) ?? '';
-  const centroidOf = new Map(munis.map((s) => [s.code, s.centroid]));
-  const offices: GeoData['offices'] = [];
-  for (const b of BUREAUS) {
-    const c = centroidOf.get(b.office);
-    if (c) offices.push({ id: b.id, branch: false, ja: b.shortJa, en: b.shortEn, x: c[0], y: c[1] });
-    for (const br of b.branches) {
-      const cb = centroidOf.get(br.office);
-      if (cb) offices.push({ id: b.id, branch: true, ja: br.ja, en: br.en.replace(' District Office', ''), x: cb[0], y: cb[1] });
-    }
-  }
+  // Prefecture and municipality layers share arcs, so they can be merged together.
+  const areaPath = (prefs: number[], codes: string[]) => {
+    const set = new Set(codes);
+    const geoms = [
+      ...prefObj.geometries.filter((g) => prefs.includes(Number(g.id))),
+      ...muniObj.geometries.filter((g) => set.has(String(g.id))),
+    ];
+    return geoms.length ? path(merge(topo, geoms as never)) ?? '' : '';
+  };
 
   return {
     width: WIDTH,
@@ -128,6 +127,6 @@ export async function loadGeo(mergeSpec: Record<string, string[]>): Promise<GeoD
     bureaus,
     bureauBorders,
     branchBorders,
-    offices,
+    areaPath,
   };
 }

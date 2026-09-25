@@ -98,3 +98,25 @@ PREFECTURE_EN = {
     "42": "Nagasaki", "43": "Kumamoto", "44": "Oita", "45": "Miyazaki", "46": "Kagoshima", "47": "Okinawa",
     "48": "Unknown / undetermined", "99": "Other (small municipalities)",
 }
+
+# Romanised base names of immigration offices (出張所 / 支局), official suffixes are
+# added in build_site_data.py: 出張所 -> "Branch Office", 支局 -> "District Office".
+OFFICE_BASE_EN = {
+    "函館": "Hakodate", "旭川": "Asahikawa", "釧路港": "Kushiro Port", "稚内港": "Wakkanai Port",
+    "千歳苫小牧": "Chitose-Tomakomai", "青森": "Aomori", "盛岡": "Morioka", "仙台空港": "Sendai Airport",
+    "秋田": "Akita", "酒田港": "Sakata Port", "郡山": "Koriyama", "水戸": "Mito", "宇都宮": "Utsunomiya",
+    "高崎": "Takasaki", "さいたま": "Saitama", "千葉": "Chiba", "松戸": "Matsudo", "立川": "Tachikawa",
+    "新潟": "Niigata", "甲府": "Kofu", "長野": "Nagano", "新宿": "Shinjuku", "横浜": "Yokohama",
+    "川崎": "Kawasaki", "成田空港": "Narita Airport", "羽田空港": "Haneda Airport", "富山": "Toyama",
+    "金沢": "Kanazawa", "福井": "Fukui", "岐阜": "Gifu", "静岡": "Shizuoka", "浜松": "Hamamatsu",
+    "豊橋港": "Toyohashi Port", "四日市港": "Yokkaichi Port", "中部空港": "Chubu Airport", "大津": "Otsu",
+    "京都": "Kyoto", "舞鶴港": "Maizuru Port", "奈良": "Nara", "和歌山": "Wakayama", "神戸": "Kobe",
+    "姫路港": "Himeji Port", "関西空港": "Kansai Airport", "境港": "Sakaiminato", "松江": "Matsue",
+    "岡山": "Okayama", "福山": "Fukuyama", "広島空港": "Hiroshima Airport", "下関": "Shimonoseki",
+    "周南": "Shunan", "徳島": "Tokushima", "松山": "Matsuyama", "高知": "Kochi", "北九州": "Kitakyushu",
+    "博多港": "Hakata Port", "福岡空港": "Fukuoka Airport", "佐賀": "Saga", "長崎": "Nagasaki",
+    "対馬": "Tsushima", "熊本": "Kumamoto", "大分": "Oita", "宮崎": "Miyazaki", "鹿児島": "Kagoshima",
+    "那覇": "Naha", "那覇空港": "Naha Airport", "嘉手納": "Kadena", "宮古島": "Miyakojima", "石垣港": "Ishigaki Port",
+}
+# 郡 (districts) named in service areas -> their municipalities (Okinawa).
+DISTRICTS = {"宮古郡": ["多良間村"], "八重山郡": ["竹富町", "与那国町"]}

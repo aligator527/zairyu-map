@@ -14,6 +14,17 @@ export interface Coded extends Label { code: string }
 export interface Nat extends Coded { region: string }
 export interface Muni extends Coded { pref: string; city: string; cityJa: string; geo: boolean }
 export interface StatusGroup extends Label { id: string; codes: number[] }
+/** Immigration office (本局・支局・出張所). Service areas overlap between offices. */
+export interface Office extends Label {
+  id: number;
+  bureau: number;
+  kind: 'bureau' | 'district' | 'branch' | 'inspection';
+  address: string;
+  muni: string;        // municipality of the office (marker position)
+  prefs: number[];     // service area: whole prefectures
+  munis: string[];     // service area: single municipalities
+  area: string;        // service area as published
+}
 
 export interface Meta {
   source: string;
@@ -28,6 +39,7 @@ export interface Meta {
   muni: Muni[];
   geoMerge: Record<string, string[]>;
   noStats: string[];
+  offices: Office[];
   /** total population per period: pref[p][0] = Japan, [1..47] = prefectures; muni[p][i] by muni index */
   population: { source: string; pref: Record<string, (number | null)[]>; muni: Record<string, (number | null)[]> };
 }

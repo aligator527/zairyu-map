@@ -4,15 +4,20 @@
   import 'd3-transition';
   import { zoom as d3zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from 'd3-zoom';
   import type { GeoData, Shape } from '../lib/geo';
+  import type { Office } from '../lib/data';
   import type { Area } from '../lib/types';
   import { classOf, type Classes, type Metric } from '../lib/scale';
   import { t, type Lang } from '../lib/i18n';
   import Tooltip from './Tooltip.svelte';
 
-  let { geo, level, areas, classes, metric, lang, focusCode, zoomTo, highlight, onselect, showBureaus = false }: {
+  let { geo, level, areas, classes, metric, lang, focusCode, zoomTo, highlight, onselect, showBureaus = false,
+        offices = [], office = null, onoffice = () => {} }: {
     geo: GeoData;
     level: 'pref' | 'muni' | 'bureau';
     showBureaus?: boolean;       // jurisdiction borders + office markers
+    offices?: Office[];
+    office?: Office | null;      // selected office: its service area is highlighted
+    onoffice?: (id: number) => void;
     areas: Map<string, Area>;
     classes: Classes;
     metric: Metric;
@@ -51,6 +56,29 @@
   });
   const shapeByCode = $derived(new Map(shapes.map((s) => [s.code, s])));
   // In the municipal view a selected prefecture is outlined with its own border.
+  // ------------------------------------------------------------ offices
+  const centroid = $derived(new Map(geo.munis.map((s) => [s.code, s.centroid])));
+  const shortName = (o: Office) => lang === 'ja'
+    ? o.ja.replace(/出入国在留管理局$|出張所$/, '')
+    : o.en.replace(/ (Regional Immigration Services Bureau|District Office|Branch Office)$/, '');
+  // Offices in the same municipality (e.g. Naha and Naha Airport) are nudged apart.
+  const markers = $derived.by(() => {
+    const seen = new Map<string, number>();
+    return offices.flatMap((o) => {
+      const c = centroid.get(o.muni);
+      if (!c) return [];
+      const n = seen.get(o.muni) ?? 0;
+      seen.set(o.muni, n + 1);
+      return [{ o, x: c[0], y: c[1], dx: n * 10 }];
+    });
+  });
+  const showMarkers = $derived(showBureaus || level === 'bureau');
+  let hoverOffice = $state<Office | null>(null);
+  const labelled = (o: Office) =>
+    o.id === office?.id || o.id === hoverOffice?.id || o.kind === 'bureau' || o.kind === 'district'
+    || (o.kind === 'branch' && transform.k >= 2.5) || transform.k >= 6;
+  const officeArea = $derived(office && office.kind !== 'inspection' ? geo.areaPath(office.prefs, office.munis) : '');
+
   const focusShape = $derived(
     focusCode ? (shapeByCode.get(focusCode) ?? geo.prefs.find((p) => p.code === focusCode) ?? null) : null,
   );
@@ -230,6 +258,12 @@
         {#if level !== 'bureau'}<path class="bureau-borders" d={geo.bureauBorders} />{/if}
       {/if}
 
+      {#if officeArea}
+        <!-- Everything outside the selected office's service area is faded. -->
+        <path class="outside" d="M-9000,-9000H10000V10000H-9000Z {officeArea}" fill-rule="evenodd" />
+        <path class="office-area" d={officeArea} />
+      {/if}
+
       {#if hover && shapeByCode.get(hover.area.code)}
         <path class="hover" d={shapeByCode.get(hover.area.code)!.d} />
       {/if}
@@ -242,17 +276,32 @@
     </g>
   </svg>
 
-  {#if showBureaus || level === 'bureau'}
-    <!-- Office markers live outside the zoom group so they keep their size. -->
+  {#if showMarkers || office}
+    <!-- Office markers live outside the zoom group so they keep their size.
+         Keyboard access to offices is through the office list in the side panel. -->
     <svg class="offices" viewBox="0 0 {geo.width} {geo.height}" aria-hidden="true"
       bind:clientWidth={boxW} bind:clientHeight={boxH}>
-      {#each geo.offices as o (o.ja)}
-        {@const [x, y] = transform.apply([o.x, o.y])}
-        <g transform="translate({x},{y}) scale({px})" class:branch={o.branch}>
-          <circle r={o.branch ? 3 : 4.5} />
-          <!-- District offices sit next to their bureau (Kobe–Osaka, Yokohama–Tokyo): label them on the left. -->
-          <text x={o.branch ? -7 : 8} dy="0.35em" text-anchor={o.branch ? 'end' : 'start'}>{lang === 'ja' ? o.ja : o.en}</text>
-        </g>
+      {#each markers as m (m.o.id)}
+        {#if showMarkers || m.o.id === office?.id}
+          {@const [x, y] = transform.apply([m.x, m.y])}
+          {@const left = m.o.kind === 'district'}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <g
+            class="m {m.o.kind}"
+            class:sel={m.o.id === office?.id}
+            transform="translate({x},{y}) scale({px}) translate({m.dx},0)"
+            onclick={(e) => { e.stopPropagation(); onoffice(m.o.id); }}
+            onpointerenter={() => (hoverOffice = m.o)}
+            onpointerleave={() => (hoverOffice = null)}
+          >
+            <circle class="hit" r="11" />
+            <circle class="dot" r={m.o.kind === 'bureau' ? 4.5 : m.o.kind === 'district' ? 3.8 : 3} />
+            {#if labelled(m.o)}
+              <!-- District offices sit next to their bureau (Kobe–Osaka, Yokohama–Tokyo): label them on the left. -->
+              <text x={left ? -7 : 8} dy="0.35em" text-anchor={left ? 'end' : 'start'}>{shortName(m.o)}</text>
+            {/if}
+          </g>
+        {/if}
       {/each}
     </svg>
   {/if}
@@ -328,13 +377,27 @@
     position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
     max-height: max(440px, calc(100dvh - 290px));
   }
-  .offices circle { fill: var(--ink); stroke: var(--surface); stroke-width: 2; }
-  .offices .branch circle { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+  .offices .m { pointer-events: auto; cursor: pointer; }
+  .offices .hit { fill: transparent; stroke: none; }
+  .offices .dot { fill: var(--ink); stroke: var(--surface); stroke-width: 2; }
+  .offices .district .dot { fill: var(--surface); stroke: var(--ink); stroke-width: 1.8; }
+  .offices .branch .dot { fill: var(--ink-2); stroke: var(--surface); stroke-width: 1.5; }
+  .offices .inspection .dot { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+  .offices .sel .dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+  .offices .m:hover .dot { stroke: var(--accent); }
   .offices text {
     font-size: 12px; font-weight: 600; fill: var(--ink);
     paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round;
   }
-  .offices .branch text { font-weight: 500; font-size: 11px; fill: var(--ink-2); }
+  .offices .district text, .offices .branch text { font-weight: 500; font-size: 11px; fill: var(--ink-2); }
+  .offices .inspection text { font-weight: 400; font-size: 10.5px; fill: var(--muted); }
+  .offices .sel text { fill: var(--accent); font-weight: 700; font-size: 12px; }
+  .outside { fill: var(--bg); opacity: 0.62; pointer-events: none; }
+  /* 墨 ink, thicker than the 藍 region focus, so the two selections never look alike. */
+  .office-area {
+    fill: none; stroke: var(--ink); stroke-width: 3; stroke-linejoin: round;
+    vector-effect: non-scaling-stroke; pointer-events: none;
+  }
   .focus, .kbd {
     fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round;
     vector-effect: non-scaling-stroke; pointer-events: none;

@@ -25,12 +25,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from site_labels import NATIONALITY_EN, PREFECTURE_EN, REGION_EN, STATUS_EN, STATUS_GROUPS
+from site_labels import (DISTRICTS, NATIONALITY_EN, OFFICE_BASE_EN, PREFECTURE_EN, REGION_EN, STATUS_EN,
+                         STATUS_GROUPS)
 
 PREF_SRC = Path("data/zairyu_gaikokujin_pref_age_sex.parquet")
 MUNI_SRC = Path("data/zairyu_gaikokujin_municipal.parquet")
 WIKIDATA = Path("data/labels/wikidata_lg_codes.csv")  # refreshed by fetch_labels.sh
 POPULATION = Path("data/population.parquet")
+OFFICES = Path("data/labels/isa_offices.json")  # refreshed by fetch_offices.py
 TOPO = Path("site/public/geo/japan.topo.json")
 OUT = Path("site/public/data")
 
@@ -78,6 +80,87 @@ def wikidata_names() -> dict[str, str]:
             if en and code not in names:
                 names[code] = romaji_base(en)
     return names
+
+
+# ---------------------------------------------------------------- immigration offices
+
+PREF_RE = re.compile(r"^(北海道|東京都|京都府|大阪府|.{2,3}?県)")
+BUREAU_BASE_EN = {"札幌": "Sapporo", "仙台": "Sendai", "東京": "Tokyo", "名古屋": "Nagoya", "大阪": "Osaka",
+                  "広島": "Hiroshima", "高松": "Takamatsu", "福岡": "Fukuoka"}
+
+
+def build_offices(munis: list[dict], prefs: list[dict]) -> list[dict]:
+    """Offices with their location (municipality code) and service area
+    (prefecture codes + municipality codes). Areas overlap by design."""
+    pref_code = {p["ja"]: int(p["code"]) for p in prefs}
+    by_pref: dict[int, list[dict]] = {}
+    for m in munis:
+        by_pref.setdefault(int(m["pref"]), []).append(m)
+
+    def resolve(name: str, pref: int) -> list[str]:
+        names = DISTRICTS.get(name, [name])
+        out = []
+        for n in names:
+            # "相模原市" (a designated city) covers all its wards.
+            hits = [m["code"] for m in by_pref.get(pref, []) if m["geo"] and (m["ja"] == n or m["cityJa"] == n)]
+            if not hits:
+                raise ValueError(f"office area: cannot resolve {n!r} in prefecture {pref}")
+            out += hits
+        return out
+
+    def parse_area(text: str) -> tuple[list[int], list[str]]:
+        area_prefs, area_munis, cur = [], [], 0
+        for tok in (t.strip() for t in text.split("、")):
+            m = PREF_RE.match(tok)
+            rest = tok
+            if m and m.group(1) in pref_code:
+                cur, rest = pref_code[m.group(1)], tok[m.end():]
+                if not rest:
+                    area_prefs.append(cur)
+                    continue
+            for part in rest.split("・"):
+                area_munis += resolve(part, cur)
+        return area_prefs, area_munis
+
+    def locate(address: str, bureau_prefs: list[int], base: str) -> str:
+        addr = re.sub(r"^[0-9０-９\-－]+\s*", "", address)
+        m = PREF_RE.match(addr)
+        cands = by_pref.get(pref_code[m.group(1)], []) if m and m.group(1) in pref_code \
+            else [x for p in bureau_prefs for x in by_pref.get(p, [])]
+        hits = [x for x in cands if x["geo"] and x["ja"] in addr] if addr else \
+               [x for x in cands if x["geo"] and x["ja"] in (base + "区", base + "市")]
+        if not hits:
+            raise ValueError(f"office location: cannot place {address!r} ({base})")
+        return max(hits, key=lambda x: len(x["ja"]))["code"]
+
+    from site_labels import PREFECTURE_EN  # noqa: F401  (kept next to the other labels)
+    bureau_prefs: dict[int, list[int]] = {}
+    raw = json.loads(OFFICES.read_text(encoding="utf-8"))
+    for o in raw:
+        if o["name"].endswith("出入国在留管理局") and o["area"] and "手続" not in o["area"]:
+            bureau_prefs[o["bureau"]] = parse_area(o["area"])[0]
+    out, seen = [], set()
+    for o in raw:
+        name, area = o["name"], o["area"]
+        if not area or name in seen:  # second tables (information centres etc.)
+            continue
+        seen.add(name)
+        inspection = "手続" in area
+        if name.endswith("出入国在留管理局"):
+            kind, base, suffix = "bureau", name.removesuffix("出入国在留管理局"), "Regional Immigration Services Bureau"
+        elif name.endswith("支局"):
+            kind, base, suffix = "district", name.removesuffix("支局"), "District Office"
+        else:
+            kind, base, suffix = "branch", name.removesuffix("出張所"), "Branch Office"
+        en_base = BUREAU_BASE_EN.get(base) or OFFICE_BASE_EN[base]
+        a_prefs, a_munis = ([], []) if inspection else parse_area(area)
+        out.append({
+            "id": len(out) + 1, "bureau": o["bureau"], "kind": "inspection" if inspection else kind,
+            "ja": name, "en": f"{en_base} {suffix}", "address": o["address"],
+            "muni": locate(o["address"], bureau_prefs[o["bureau"]], base),
+            "prefs": a_prefs, "munis": a_munis, "area": area,
+        })
+    return out
 
 
 def main() -> None:
@@ -176,6 +259,8 @@ def main() -> None:
     miss = [m["code"] for i, m in enumerate(meta["muni"]) if m["geo"] and meta["population"]["muni"][meta["periods"]["muni"][-1]][i + 1] is None]
     if miss:
         print("municipalities without population:", miss)
+    meta["offices"] = build_offices(meta["muni"], meta["pref"])
+
     # What this build was made from; check_updates.py compares it with e-Stat.
     meta["sources"] = {
         "zairyu": [{k: e.get(k) for k in ("dataset", "period", "stat_inf_id", "updated", "title")}

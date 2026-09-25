@@ -42,6 +42,8 @@ class AppState {
   bureau = $state(0);
   /** draw immigration bureau jurisdictions over the prefecture / municipal map */
   showBureaus = $state(false);
+  /** selected immigration office (meta.offices id) — 0 = none */
+  office = $state(0);
 
   view = $state<'map' | 'table'>('map');
 
@@ -82,6 +84,7 @@ class AppState {
     if (this.muni) p.set('c', String(this.muni));
     if (this.bureau) p.set('b', String(this.bureau));
     if (this.showBureaus) p.set('o', '1');
+    if (this.office) p.set('f', String(this.office));
     if (this.view !== 'map') p.set('v', this.view);
     return p.toString();
   }
@@ -105,6 +108,7 @@ class AppState {
     this.muni = Math.max(0, Number(p.get('c')) || 0);
     this.bureau = Math.min(8, Math.max(0, Number(p.get('b')) || 0));
     this.showBureaus = p.get('o') === '1';
+    this.office = Math.max(0, Number(p.get('f')) || 0);
     this.view = p.get('v') === 'table' ? 'table' : 'map';
   }
 }

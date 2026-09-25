@@ -15,6 +15,23 @@ const strings = {
   showBureaus: { ja: '入管の管轄', en: 'Bureau areas' },
   showBureausHint: { ja: '地方出入国在留管理局の管轄区域の境界と所在地を表示', en: 'Show the jurisdictions and offices of the regional immigration bureaus' },
   jurisdiction: { ja: '管轄', en: 'Immigration bureau' },
+  offices: { ja: '窓口（本局・支局・出張所）', en: 'Offices' },
+  officeKind_bureau: { ja: '地方出入国在留管理局', en: 'Regional bureau' },
+  officeKind_district: { ja: '支局', en: 'District office' },
+  officeKind_branch: { ja: '出張所', en: 'Branch office' },
+  officeKind_inspection: { ja: '出入国審査のみ', en: 'Immigration inspection only' },
+  inspectionNote: { ja: 'この官署では在留関係の手続は取り扱っていません（空港・海港での出入国審査）。', en: 'This office does not handle residence procedures (airport / seaport immigration inspection only).' },
+  serviceArea: { ja: '在留手続の分担区域', en: 'Service area for residence procedures' },
+  address: { ja: '所在地', en: 'Address' },
+  residentsInArea: { ja: '区域内の在留外国人', en: 'Foreign residents in the service area' },
+  areaMuniMissing: {
+    ja: '市区町村単位の区域は2023年12月以降の時点でのみ集計できます。この値には含まれていません。',
+    en: 'Municipal parts of the area can only be counted from Dec 2023; they are not included here.',
+  },
+  officeNote: {
+    ja: '分担区域は重なっており、住所地を管轄する地方局・支局でも手続ができます。出典：出入国在留管理庁。',
+    en: 'Service areas overlap: residents may also apply at the bureau or district office covering their address. Source: Immigration Services Agency.',
+  },
   bureauPrefs: { ja: '管轄する都道府県', en: 'Prefectures covered' },
   bureauNote: {
     ja: '地方出入国在留管理局（8局）の管轄区域。神奈川県は横浜支局、兵庫県は神戸支局、沖縄県は那覇支局が管轄します（細線）。出典：出入国在留管理庁。',
