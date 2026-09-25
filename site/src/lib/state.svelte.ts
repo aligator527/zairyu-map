@@ -2,7 +2,7 @@
 // and is mirrored into the URL hash, so any view can be bookmarked or shared.
 
 import { SvelteSet } from 'svelte/reactivity';
-import type { Level } from './data';
+import { dataLevel, type View } from './data';
 import { detectLang, type Lang } from './i18n';
 import type { Metric } from './scale';
 
@@ -25,7 +25,7 @@ class AppState {
   theme = $state<Theme>(readStored('theme', ['system', 'light', 'dark'] as const) ?? 'system');
   systemDark = $state(false);
 
-  level = $state<Level>('pref');
+  level = $state<View>('pref');
   period = $state<string>('');
   metric = $state<Metric>('count');
 
@@ -38,6 +38,10 @@ class AppState {
   pref = $state(0);
   /** focused municipality index (meta.muni[i-1]) — 0 = none */
   muni = $state(0);
+  /** focused immigration bureau (1..8) in the bureau view — 0 = none */
+  bureau = $state(0);
+  /** draw immigration bureau jurisdictions over the prefecture / municipal map */
+  showBureaus = $state(false);
 
   view = $state<'map' | 'table'>('map');
 
@@ -76,6 +80,8 @@ class AppState {
     if (this.age) p.set('a', `${this.age[0]}-${this.age[1]}`);
     if (this.pref) p.set('r', String(this.pref));
     if (this.muni) p.set('c', String(this.muni));
+    if (this.bureau) p.set('b', String(this.bureau));
+    if (this.showBureaus) p.set('o', '1');
     if (this.view !== 'map') p.set('v', this.view);
     return p.toString();
   }
@@ -83,8 +89,9 @@ class AppState {
   fromHash(hash: string, periods: { pref: string[]; muni: string[] }) {
     const p = new URLSearchParams(hash.replace(/^#/, ''));
     const nums = (k: string) => (p.get(k) ?? '').split('.').map(Number).filter((v) => Number.isInteger(v) && v > 0);
-    const level = p.get('g') === 'muni' ? 'muni' : 'pref';
-    const list = periods[level];
+    const g = p.get('g');
+    const level: View = g === 'muni' || g === 'bureau' ? g : 'pref';
+    const list = periods[dataLevel(level)];
     this.level = level;
     this.period = list.includes(p.get('p') ?? '') ? p.get('p')! : list[list.length - 1];
     const m = p.get('m');
@@ -96,6 +103,8 @@ class AppState {
     this.age = a.length === 2 && a[0] >= 1 && a[1] <= 17 && a[0] <= a[1] ? [a[0], a[1]] : null;
     this.pref = Math.min(47, Math.max(0, Number(p.get('r')) || 0));
     this.muni = Math.max(0, Number(p.get('c')) || 0);
+    this.bureau = Math.min(8, Math.max(0, Number(p.get('b')) || 0));
+    this.showBureaus = p.get('o') === '1';
     this.view = p.get('v') === 'table' ? 'table' : 'map';
   }
 }

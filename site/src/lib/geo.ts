@@ -5,6 +5,7 @@
 import { geoIdentity, geoPath } from 'd3-geo';
 import { feature, merge, mesh } from 'topojson-client';
 import type { GeometryCollection, Topology } from 'topojson-specification';
+import { BUREAUS, bureauCode, bureauOfPref } from './bureaus';
 
 export const WIDTH = 1000;
 
@@ -26,6 +27,12 @@ export interface GeoData {
   merged: Map<string, Shape & { parts: string[] }>;
   /** bbox to frame when zooming to a prefecture (outlying islands left out) */
   prefFrame: Map<string, Shape['bbox']>;
+  /** immigration bureau jurisdictions (merged prefectures), code "B1".."B8" */
+  bureaus: Shape[];
+  bureauBorders: string;   // between bureaus
+  branchBorders: string;   // around the prefectures of 支局 (Kanagawa, Hyogo, Okinawa)
+  /** office markers: bureau head offices and district offices */
+  offices: { id: number; branch: boolean; ja: string; en: string; x: number; y: number }[];
 }
 
 type Meta = {
@@ -85,6 +92,30 @@ export async function loadGeo(mergeSpec: Record<string, string[]>): Promise<GeoD
                            [Math.max(b[1][0], s.bbox[1][0]), Math.max(b[1][1], s.bbox[1][1])]] : s.bbox);
   }
 
+  // ---- immigration bureaus
+  const prefBureau = (g: { id?: string | number }) => bureauOfPref[Number(g.id)];
+  const bureaus: Shape[] = BUREAUS.map((b) => {
+    const geoms = prefObj.geometries.filter((g) => prefBureau(g) === b.id);
+    const m = merge(topo, geoms as never);
+    return { code: bureauCode(b.id), name: b.ja, d: path(m) ?? '', bbox: path.bounds(m) as Shape['bbox'],
+             centroid: path.centroid(m) as [number, number] };
+  });
+  const branchPrefs = new Set(BUREAUS.flatMap((b) => b.branches.map((br) => br.pref)));
+  const bureauBorders = path(mesh(topo, prefObj as never, (a, b) => prefBureau(a) !== prefBureau(b))) ?? '';
+  const branchBorders = path(mesh(topo, prefObj as never, (a, b) =>
+    a !== b && prefBureau(a) === prefBureau(b) &&
+    (branchPrefs.has(Number(a.id)) || branchPrefs.has(Number(b.id))))) ?? '';
+  const centroidOf = new Map(munis.map((s) => [s.code, s.centroid]));
+  const offices: GeoData['offices'] = [];
+  for (const b of BUREAUS) {
+    const c = centroidOf.get(b.office);
+    if (c) offices.push({ id: b.id, branch: false, ja: b.shortJa, en: b.shortEn, x: c[0], y: c[1] });
+    for (const br of b.branches) {
+      const cb = centroidOf.get(br.office);
+      if (cb) offices.push({ id: b.id, branch: true, ja: br.ja, en: br.en.replace(' District Office', ''), x: cb[0], y: cb[1] });
+    }
+  }
+
   return {
     width: WIDTH,
     height,
@@ -94,5 +125,9 @@ export async function loadGeo(mergeSpec: Record<string, string[]>): Promise<GeoD
     insets: Object.keys(insets).map(frame),
     merged,
     prefFrame,
+    bureaus,
+    bureauBorders,
+    branchBorders,
+    offices,
   };
 }

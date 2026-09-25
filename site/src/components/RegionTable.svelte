@@ -7,7 +7,7 @@
   let { areas, lang, level, metric, focusCode, onselect }: {
     areas: Area[];
     lang: Lang;
-    level: 'pref' | 'muni';
+    level: 'pref' | 'muni' | 'bureau';
     metric: Metric;
     focusCode: string | null;
     onselect: (code: string) => void;
@@ -62,7 +62,7 @@
             <td class="num tnum muted">{i + 1}</td>
             <th scope="row">
               <button type="button" class="place" onclick={() => onselect(a.code)}>
-                {a.name}{#if level === 'muni' && a.parent}<span class="muted"> · {a.parent}</span>{/if}
+                {a.name}{#if level !== 'pref' && a.parent}<span class="muted"> · {a.parent}</span>{/if}
               </button>
             </th>
             {#if a.state === 'hidden'}

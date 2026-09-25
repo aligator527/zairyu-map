@@ -9,9 +9,10 @@
   import { t, type Lang } from '../lib/i18n';
   import Tooltip from './Tooltip.svelte';
 
-  let { geo, level, areas, classes, metric, lang, focusCode, zoomTo, highlight, onselect }: {
+  let { geo, level, areas, classes, metric, lang, focusCode, zoomTo, highlight, onselect, showBureaus = false }: {
     geo: GeoData;
-    level: 'pref' | 'muni';
+    level: 'pref' | 'muni' | 'bureau';
+    showBureaus?: boolean;       // jurisdiction borders + office markers
     areas: Map<string, Area>;
     classes: Classes;
     metric: Metric;
@@ -25,12 +26,16 @@
   let svg: SVGSVGElement;
   let wrap: HTMLDivElement | undefined = $state();
   let transform = $state<ZoomTransform>(zoomIdentity);
+  // Rendered size of the map, to keep office labels at a constant screen size.
+  let boxW = $state(1000), boxH = $state(800);
+  const px = $derived(1 / Math.max(1e-6, Math.min(boxW / geo.width, boxH / geo.height)));
   let hover = $state<{ area: Area; x: number; y: number } | null>(null);
   let pinned = $state<Area | null>(null); // touch: tapped area shown as a card
   let zb: ZoomBehavior<SVGSVGElement, unknown>;
 
   const shapes = $derived.by((): Shape[] => {
     if (level === 'pref') return geo.prefs;
+    if (level === 'bureau') return geo.bureaus;
     const list = geo.munis.slice();
     for (const [code, s] of geo.merged) {
       if (areas.has(code)) list.push(s);
@@ -103,7 +108,7 @@
     if (zoomTo) {
       const b = geo.prefFrame.get(zoomTo);
       if (b) frame(b);
-    } else if (level === 'pref') {
+    } else if (level !== 'muni') {
       select(svg).call(zb.transform, zoomIdentity);
     }
   });
@@ -138,11 +143,12 @@
     onselect(code === focusCode && !touch ? null : code);
   }
 
-  // Roving focus over prefectures (arrow keys), Enter selects.
+  // Roving focus over prefectures / bureaus (arrow keys), Enter selects.
   let kbd = $state<string | null>(null);
   function onkeydown(e: KeyboardEvent) {
-    if (level !== 'pref') return;
-    const codes = geo.prefs.map((s) => s.code);
+    if (level === 'muni') return;
+    const list = level === 'bureau' ? geo.bureaus : geo.prefs;
+    const codes = list.map((s) => s.code);
     const cur = kbd ?? focusCode ?? codes[0];
     let i = codes.indexOf(cur);
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') i = Math.min(codes.length - 1, i + 1);
@@ -154,7 +160,7 @@
     else return;
     e.preventDefault();
     kbd = codes[i];
-    const s = geo.prefs[i];
+    const s = list[i];
     const a = areas.get(s.code);
     if (a) {
       const [cx, cy] = transform.apply(s.centroid);
@@ -219,6 +225,10 @@
       {#if level === 'muni'}
         <path class="pref-borders" d={geo.prefBorders} />
       {/if}
+      {#if showBureaus || level === 'bureau'}
+        <path class="branch-borders" d={geo.branchBorders} />
+        {#if level !== 'bureau'}<path class="bureau-borders" d={geo.bureauBorders} />{/if}
+      {/if}
 
       {#if hover && shapeByCode.get(hover.area.code)}
         <path class="hover" d={shapeByCode.get(hover.area.code)!.d} />
@@ -231,6 +241,21 @@
       {/if}
     </g>
   </svg>
+
+  {#if showBureaus || level === 'bureau'}
+    <!-- Office markers live outside the zoom group so they keep their size. -->
+    <svg class="offices" viewBox="0 0 {geo.width} {geo.height}" aria-hidden="true"
+      bind:clientWidth={boxW} bind:clientHeight={boxH}>
+      {#each geo.offices as o (o.ja)}
+        {@const [x, y] = transform.apply([o.x, o.y])}
+        <g transform="translate({x},{y}) scale({px})" class:branch={o.branch}>
+          <circle r={o.branch ? 3 : 4.5} />
+          <!-- District offices sit next to their bureau (Kobe–Osaka, Yokohama–Tokyo): label them on the left. -->
+          <text x={o.branch ? -7 : 8} dy="0.35em" text-anchor={o.branch ? 'end' : 'start'}>{lang === 'ja' ? o.ja : o.en}</text>
+        </g>
+      {/each}
+    </svg>
+  {/if}
 
   <div class="sr-only" aria-live="polite">{kbdLabel}</div>
 
@@ -291,6 +316,25 @@
     fill: none; stroke: var(--ink-2); stroke-opacity: 0.55; stroke-width: 0.8;
     vector-effect: non-scaling-stroke; pointer-events: none;
   }
+  .bureau-borders {
+    fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round;
+    vector-effect: non-scaling-stroke; pointer-events: none;
+  }
+  .branch-borders {
+    fill: none; stroke: var(--ink); stroke-opacity: 0.7; stroke-width: 1;
+    vector-effect: non-scaling-stroke; pointer-events: none;
+  }
+  .offices {
+    position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
+    max-height: max(440px, calc(100dvh - 290px));
+  }
+  .offices circle { fill: var(--ink); stroke: var(--surface); stroke-width: 2; }
+  .offices .branch circle { fill: var(--surface); stroke: var(--ink); stroke-width: 1.5; }
+  .offices text {
+    font-size: 12px; font-weight: 600; fill: var(--ink);
+    paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round;
+  }
+  .offices .branch text { font-weight: 500; font-size: 11px; fill: var(--ink-2); }
   .focus, .kbd {
     fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round;
     vector-effect: non-scaling-stroke; pointer-events: none;

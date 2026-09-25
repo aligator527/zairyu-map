@@ -2,7 +2,7 @@
   import { t, type Lang } from '../lib/i18n';
   import { norm } from '../lib/text';
 
-  interface Place { code: string; name: string; alt: string; parent: string; kind: 'pref' | 'muni' }
+  interface Place { code: string; name: string; alt: string; parent: string; kind: 'pref' | 'muni' | 'bureau' }
   let { places, lang, onpick }: { places: Place[]; lang: Lang; onpick: (p: Place) => void } = $props();
 
   let q = $state('');

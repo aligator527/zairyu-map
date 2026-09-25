@@ -7,7 +7,7 @@
     area: Area;
     metric: Metric;
     lang: Lang;
-    level: 'pref' | 'muni';
+    level: 'pref' | 'muni' | 'bureau';
     x?: number;
     y?: number;
     bounds?: HTMLElement | null;
@@ -40,7 +40,12 @@
   role={pinned ? 'status' : 'tooltip'}
 >
   <p class="name">{area.name}</p>
-  <p class="sub">{level === 'muni' && area.parent ? `${area.parent} · ` : ''}{area.alt}</p>
+  {#if level === 'bureau'}
+    <p class="sub">{area.alt}</p>
+    <p class="prefs"><span>{t(lang, 'bureauPrefs')}</span> {area.parent}</p>
+  {:else}
+    <p class="sub">{level === 'muni' && area.parent ? `${area.parent} · ` : ''}{area.alt}</p>
+  {/if}
 
   {#if area.state === 'excluded'}
     <p class="note">{t(lang, 'excluded')}</p>
@@ -100,5 +105,7 @@
   dt { color: var(--muted); }
   dd { margin: 0; text-align: right; }
   .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .prefs { font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
+  .prefs span { color: var(--muted); display: block; }
   .u { font-size: 11.5px; font-weight: 400; color: var(--muted); margin-left: 6px; letter-spacing: 0; }
 </style>

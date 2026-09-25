@@ -49,12 +49,17 @@ export function makeClasses(values: number[], metric: Metric, dark: boolean): Cl
     return { breaks: [-t3, -t2, -t1, t1, t2, t3], colors: DIV[mode], diverging: true };
   }
   const pos = values.filter((v) => v > 0 && isFinite(v)).sort((a, b) => a - b);
-  const colors = SEQ[mode];
-  if (pos.length === 0) return { breaks: [], colors: colors.slice(0, 1), diverging: false };
-  const raw = quantiles(pos, colors.length).map(nice);
+  const ramp = SEQ[mode];
+  if (pos.length === 0) return { breaks: [], colors: ramp.slice(0, 1), diverging: false };
+  // Few areas (e.g. 8 bureaus): fewer classes, so colour does not just encode rank.
+  const k = pos.length < 14 ? Math.max(2, Math.floor(pos.length / 2)) : ramp.length;
+  const raw = quantiles(pos, k).map(nice);
   const breaks: number[] = [];
   for (const b of raw) if (b > (breaks.at(-1) ?? 0)) breaks.push(b);
-  return { breaks, colors: colors.slice(colors.length - breaks.length - 1), diverging: false };
+  // Spread the classes over the whole ramp.
+  const n = breaks.length + 1;
+  const colors = Array.from({ length: n }, (_, i) => ramp[n === 1 ? ramp.length - 1 : Math.round((i * (ramp.length - 1)) / (n - 1))]);
+  return { breaks, colors, diverging: false };
 }
 
 export function classOf(c: Classes, v: number): number {

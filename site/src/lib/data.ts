@@ -5,6 +5,9 @@
 // milliseconds even for the ~600k-row municipal periods.
 
 export type Level = 'pref' | 'muni';
+/** What the map shows; the bureau view is built from prefecture data. */
+export type View = Level | 'bureau';
+export const dataLevel = (v: View): Level => (v === 'muni' ? 'muni' : 'pref');
 
 export interface Label { ja: string; en: string }
 export interface Coded extends Label { code: string }
@@ -126,11 +129,11 @@ export interface Aggregate {
 
 /**
  * One pass over a period block.
- * focus: region index to compute the breakdowns for, or 0 for the whole country
- * (for municipalities, focusPref restricts to one prefecture instead).
+ * focus: regions (by index) the totals and breakdowns are computed for — one
+ * prefecture, a municipality, all municipalities of a prefecture or the
+ * prefectures of an immigration bureau; null = the whole country.
  */
-export function aggregate(b: Block, f: Filters, regions: number, focus = 0, focusPref = 0,
-                          muniPref?: Uint8Array): Aggregate {
+export function aggregate(b: Block, f: Filters, regions: number, focus: Uint8Array | null = null): Aggregate {
   const natM = mask(f.nat), stM = mask(f.status), sexM = mask(f.sex, 4);
   let ageM: Uint8Array | null = null;
   if (f.age) { ageM = new Uint8Array(20); for (let a = f.age[0]; a <= f.age[1]; a++) ageM[a] = 1; }
@@ -143,7 +146,7 @@ export function aggregate(b: Block, f: Filters, regions: number, focus = 0, focu
   for (let i = 0; i < n; i++) {
     const c = count[i], r = region[i];
     all[r] += c;
-    const inFocus = focus ? r === focus : focusPref ? (muniPref ? muniPref[r] === focusPref : r === focusPref) : true;
+    const inFocus = !focus || focus[r] === 1;
     if (inFocus) totalAll += c;
 
     const nv = nat[i], sv = status[i], xv = sex[i], av = age[i];
@@ -172,6 +175,13 @@ export function aggregate(b: Block, f: Filters, regions: number, focus = 0, focu
 }
 
 /** Total for a region (or Japan) under all filters; used for the time series. */
-export function totalFor(b: Block, f: Filters, focus = 0, focusPref = 0, muniPref?: Uint8Array): number {
-  return aggregate(b, f, b.level === 'pref' ? 100 : 65536, focus, focusPref, muniPref).total;
+export function totalFor(b: Block, f: Filters, focus: Uint8Array | null = null): number {
+  return aggregate(b, f, b.level === 'pref' ? 100 : 65536, focus).total;
+}
+
+/** Mask with 1 at the given region indexes. */
+export function maskOf(size: number, ids: Iterable<number>): Uint8Array {
+  const m = new Uint8Array(size);
+  for (const i of ids) m[i] = 1;
+  return m;
 }

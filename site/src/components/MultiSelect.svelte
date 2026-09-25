@@ -124,11 +124,12 @@
 {/snippet}
 
 <style>
-  .ms { position: relative; display: grid; gap: 4px; min-width: 0; }
+  /* minmax(0, 1fr): a long selection is truncated instead of widening the field */
+  .ms { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
   .lbl { font-size: 12px; color: var(--muted); font-weight: 500; }
   .trigger {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    min-height: 38px; padding: 0 10px 0 12px; width: 100%;
+    min-height: 38px; padding: 0 10px 0 12px; width: 100%; min-width: 0;
     border: 1px solid var(--line-strong); border-radius: 8px;
     background: var(--surface); text-align: left; font-size: 14px;
   }

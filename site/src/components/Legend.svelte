@@ -6,7 +6,7 @@
     classes: Classes;
     metric: Metric;
     lang: Lang;
-    level: 'pref' | 'muni';
+    level: 'pref' | 'muni' | 'bureau';
     showHidden: boolean;
     highlight?: number | null;
   } = $props();

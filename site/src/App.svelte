@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { aggregate, loadBlock, loadMeta, totalFor, type Block, type Filters, type Level, type Meta } from './lib/data';
+  import { aggregate, dataLevel, loadBlock, loadMeta, maskOf, totalFor, type Block, type Filters, type Level, type Meta, type View } from './lib/data';
+  import { BUREAUS, branchOfPref, bureauCode, bureauOfPref } from './lib/bureaus';
   import { loadGeo, type GeoData } from './lib/geo';
   import { app, type Theme } from './lib/state.svelte';
   import { periodLabel, t } from './lib/i18n';
@@ -82,7 +83,8 @@
     const p = meta?.pref.find((x) => Number(x.code) === code);
     return p ? p[L] : '';
   };
-  const periods = $derived(meta ? meta.periods[app.level] : []);
+  const DL = $derived(dataLevel(app.level));
+  const periods = $derived(meta ? meta.periods[DL] : []);
   const prevPeriod = $derived.by(() => {
     const i = periods.indexOf(app.period);
     return i > 0 ? periods[i - 1] : null;
@@ -90,7 +92,7 @@
 
   // ------------------------------------------------------------ loading
   $effect(() => {
-    const lv = app.level, p = app.period;
+    const lv = DL, p = app.period;
     if (!meta || !p) return;
     let alive = true;
     loading = true;
@@ -100,7 +102,7 @@
     return () => { alive = false; };
   });
   $effect(() => {
-    const lv = app.level, p = prevPeriod;
+    const lv = DL, p = prevPeriod;
     if (!meta) return;
     if (!p) { prevBlock = null; return; }
     let alive = true;
@@ -123,7 +125,7 @@
   $effect(() => {
     if (!meta) return;
     const wanted: [Level, string][] = [...meta.periods.pref].reverse().map((p) => ['pref', p]);
-    if (app.level === 'muni') wanted.unshift(...[...meta.periods.muni].reverse().map((p): [Level, string] => ['muni', p]));
+    if (DL === 'muni') wanted.unshift(...[...meta.periods.muni].reverse().map((p): [Level, string] => ['muni', p]));
     let alive = true;
     (async () => {
       for (const [lv, p] of wanted) {
@@ -147,28 +149,39 @@
     age: app.age ? [app.age[0], app.age[1]] : null,
   });
 
-  const focusArgs = $derived.by((): [number, number] => {
-    if (app.level === 'muni') return app.muni ? [app.muni, 0] : [0, app.pref];
-    return [app.pref, 0];
+  const regionCount = $derived(DL === 'pref' ? 100 : (meta?.muni.length ?? 0) + 2);
+  const prefMask = (prefs: number[]) => maskOf(100, prefs);
+  // Regions the totals and breakdowns are computed for (null = all of Japan).
+  const focusMask = $derived.by((): Uint8Array | null => {
+    if (app.level === 'muni') {
+      if (app.muni) return maskOf(regionCount, [app.muni]);
+      if (!app.pref) return null;
+      const m = new Uint8Array(regionCount);
+      muniPref.forEach((p, i) => { if (p === app.pref) m[i] = 1; });
+      return m;
+    }
+    if (app.level === 'bureau') return app.bureau ? prefMask(BUREAUS[app.bureau - 1].prefs) : null;
+    return app.pref ? prefMask([app.pref]) : null;
   });
-  const regionCount = $derived(app.level === 'pref' ? 100 : (meta?.muni.length ?? 0) + 2);
-  const blockOk = (b: Block | null) => !!b && b.level === app.level;
+  const blockOk = (b: Block | null) => !!b && b.level === DL;
 
-  const agg = $derived(blockOk(block) ? aggregate(block!, filters, regionCount, ...focusArgs, muniPref) : null);
+  const agg = $derived(blockOk(block) ? aggregate(block!, filters, regionCount, focusMask) : null);
   const prevAgg = $derived(
     blockOk(prevBlock) && prevBlock!.period === prevPeriod
-      ? aggregate(prevBlock!, filters, regionCount, ...focusArgs, muniPref) : null,
+      ? aggregate(prevBlock!, filters, regionCount, focusMask) : null,
   );
 
   const usePrefPanel = $derived(app.level === 'muni' && !app.muni);
   const panelPrevPeriod = $derived(usePrefPanel ? (meta?.periods.pref[meta.periods.pref.indexOf(app.period) - 1] ?? null) : prevPeriod);
   const panel = $derived.by(() => {
     if (!usePrefPanel) return agg;
-    return prefBlock && prefBlock.period === app.period ? aggregate(prefBlock, filters, 100, app.pref, 0) : null;
+    return prefBlock && prefBlock.period === app.period
+      ? aggregate(prefBlock, filters, 100, app.pref ? prefMask([app.pref]) : null) : null;
   });
   const panelPrev = $derived.by(() => {
     if (!usePrefPanel) return prevAgg;
-    return prefPrevBlock && prefPrevBlock.period === panelPrevPeriod ? aggregate(prefPrevBlock, filters, 100, app.pref, 0) : null;
+    return prefPrevBlock && prefPrevBlock.period === panelPrevPeriod
+      ? aggregate(prefPrevBlock, filters, 100, app.pref ? prefMask([app.pref]) : null) : null;
   });
 
   const pooledPeriod = $derived(app.level === 'muni' && (app.period === '2023-12' || app.period === '2024-06'));
@@ -176,14 +189,16 @@
   const areas = $derived.by((): Area[] => {
     if (!meta || !agg) return [];
     const out: Area[] = [];
-    const popList = app.level === 'pref' ? meta.population.pref[app.period] : meta.population.muni[app.period];
+    const popList = DL === 'pref' ? meta.population.pref[app.period] : meta.population.muni[app.period];
+    // Sums over a set of region indexes (one region, or the prefectures of a bureau).
+    const sum = (a: Float64Array | undefined, ids: number[]) => (a ? ids.reduce((s, i) => s + a[i], 0) : NaN);
     const mk = (idx: number, code: string, name: string, alt: string, parent: string, prefIdx: number,
-                present: boolean): Area => {
-      const count = agg.value[idx], hidden = agg.hidden[idx], all = agg.all[idx];
-      const pop = (idx && popList?.[idx]) || NaN;
+                present: boolean, ids: number[] = [idx]): Area => {
+      const count = sum(agg.value, ids), hidden = sum(agg.hidden, ids), all = sum(agg.all, ids);
+      const pop = (idx && ids.reduce((s, i) => s + (popList?.[i] ?? NaN), 0)) || NaN;
       const per1000 = pop > 0 ? (count / pop) * 1000 : NaN;
-      const prev = prevAgg ? prevAgg.value[idx] : NaN;
-      const prevHidden = prevAgg ? prevAgg.hidden[idx] : 0;
+      const prev = sum(prevAgg?.value, ids);
+      const prevHidden = prevAgg ? sum(prevAgg.hidden, ids) : 0;
       const share = all > 0 ? (count / all) * 100 : NaN;
       const change = prev > 0 && prevHidden === 0 && (hidden === 0 || count > 0) ? ((count - prev) / prev) * 100 : NaN;
       let state: Area['state'] = 'ok';
@@ -194,6 +209,14 @@
         : app.metric === 'per1000' ? per1000 : change;
       return { idx, code, name, alt, parent, prefIdx, count, hidden, all, pop, per1000, share, change, prevCount: prev, value, state };
     };
+    if (app.level === 'bureau') {
+      const sep = L === 'ja' ? '・' : ', ';
+      for (const b of BUREAUS) {
+        const alt = L === 'ja' ? b.en : b.ja;
+        out.push(mk(b.id, bureauCode(b.id), b[L], alt, b.prefs.map(prefName).join(sep), 0, true, b.prefs));
+      }
+      return out;
+    }
     if (app.level === 'pref') {
       for (const p of meta.pref) {
         const idx = Number(p.code);
@@ -231,10 +254,14 @@
     if (!meta) return [];
     const useMuni = app.level === 'muni' && app.muni > 0;
     const list = useMuni ? meta.periods.muni : meta.periods.pref;
+    // Japan, a prefecture or a bureau always come from the complete prefecture data.
+    const mask = useMuni ? focusMask
+      : app.level === 'bureau' ? (app.bureau ? prefMask(BUREAUS[app.bureau - 1].prefs) : null)
+      : app.pref ? prefMask([app.pref]) : null;
     return list.map((p) => {
       const b = blocks.get(`${useMuni ? 'muni' : 'pref'}/${p}`);
       if (!b) return { period: p, value: null };
-      return { period: p, value: useMuni ? totalFor(b, filters, app.muni, 0, muniPref) : totalFor(b, filters, app.pref) };
+      return { period: p, value: totalFor(b, filters, mask) };
     });
   });
 
@@ -249,15 +276,18 @@
   const natPicker = $derived([...natItems].sort((a, b) => b.value - a.value));
 
   // ------------------------------------------------------------ actions
-  function setLevel(lv: Level) {
+  function setLevel(lv: View) {
     if (!meta || lv === app.level) return;
-    const list = meta.periods[lv];
+    const list = meta.periods[dataLevel(lv)];
     if (!list.includes(app.period)) app.period = list[list.length - 1];
+    if (lv === 'bureau') app.bureau = app.pref ? bureauOfPref[app.pref] : app.bureau;
+    else app.bureau = 0;
+    if (lv !== 'muni') app.muni = 0;
     app.level = lv;
-    if (lv === 'pref') app.muni = 0;
   }
   function select(code: string | null) {
-    if (!code) { app.pref = 0; app.muni = 0; return; }
+    if (!code) { app.pref = 0; app.muni = 0; app.bureau = 0; return; }
+    if (code.startsWith('B')) { app.bureau = Number(code.slice(1)); return; }
     if (app.level === 'pref' || code.length === 2) { app.pref = Number(code); app.muni = 0; return; }
     const idx = muniIdx.get(code);
     app.pref = Number(code.slice(0, 2));
@@ -277,24 +307,38 @@
 
   const places = $derived.by(() => {
     if (!meta) return [];
-    type Place = { code: string; name: string; alt: string; parent: string; kind: 'pref' | 'muni' };
-    const list: Place[] = meta.pref.filter((p) => Number(p.code) <= 47)
-      .map((p) => ({ code: p.code, name: p[L], alt: p[L === 'ja' ? 'en' : 'ja'], parent: '', kind: 'pref' }));
+    type Place = { code: string; name: string; alt: string; parent: string; kind: 'pref' | 'muni' | 'bureau' };
+    const list: Place[] = BUREAUS.map((b) => ({ code: bureauCode(b.id), name: b[L], alt: L === 'ja' ? b.en : b.ja, parent: '', kind: 'bureau' }));
+    list.push(...meta.pref.filter((p) => Number(p.code) <= 47)
+      .map((p): Place => ({ code: p.code, name: p[L], alt: p[L === 'ja' ? 'en' : 'ja'], parent: '', kind: 'pref' })));
     for (const m of meta.muni) {
       if (!m.geo) continue;
       list.push({ code: m.code, name: m[L], alt: m[L === 'ja' ? 'en' : 'ja'], parent: prefName(Number(m.pref)), kind: 'muni' });
     }
     return list;
   });
-  function pickPlace(p: { code: string; kind: 'pref' | 'muni' }) {
+  function pickPlace(p: { code: string; kind: 'pref' | 'muni' | 'bureau' }) {
     if (p.kind === 'muni' && app.level !== 'muni') setLevel('muni');
+    if (p.kind === 'bureau' && app.level !== 'bureau') setLevel('bureau');
+    if (p.kind === 'pref' && app.level === 'bureau') setLevel('pref');
     select(p.code);
   }
+  /** jump from a prefecture to its bureau, or from a bureau to one of its prefectures */
+  function goBureau(id: number) { setLevel('bureau'); app.bureau = id; }
+  function goPref(pref: number) { setLevel('pref'); app.pref = pref; app.muni = 0; }
 
   // ------------------------------------------------------------ readout
+  const prefCode = (p: number) => String(p).padStart(2, '0');
+  /** code of the selected area on the map / in the table */
+  const focusCode = $derived.by((): string | null => {
+    if (app.level === 'bureau') return app.bureau ? bureauCode(app.bureau) : null;
+    if (app.level === 'muni' && app.muni) return meta?.muni[app.muni - 1]?.code ?? null;
+    return app.pref ? prefCode(app.pref) : null;
+  });
   const focusName = $derived.by(() => {
     if (!meta) return '';
     if (app.level === 'muni' && app.muni) return meta.muni[app.muni - 1]?.[L] ?? '';
+    if (app.level === 'bureau') return app.bureau ? BUREAUS[app.bureau - 1][L] : tt('japan');
     return app.pref ? prefName(app.pref) : tt('japan');
   });
   const delta = $derived(
@@ -305,7 +349,9 @@
   const focusPop = $derived.by(() => {
     if (!meta) return NaN;
     if (app.level === 'muni' && app.muni) return meta.population.muni[app.period]?.[app.muni] ?? NaN;
-    return meta.population.pref[app.period]?.[app.pref] ?? NaN;
+    const pops = meta.population.pref[app.period];
+    if (app.level === 'bureau' && app.bureau) return BUREAUS[app.bureau - 1].prefs.reduce((s, p) => s + (pops?.[p] ?? NaN), 0);
+    return pops?.[app.level === 'bureau' ? 0 : app.pref] ?? NaN;
   });
   const muniAgeSexMissing = $derived(
     app.level === 'muni' && !!meta && !meta.periods.muniAgeSex.includes(app.period) && (app.sex.size > 0 || app.age !== null),
@@ -361,7 +407,9 @@
       <div class="field">
         <span class="lbl">{tt('level')}</span>
         <Segmented label={tt('level')} value={app.level} onchange={setLevel}
-          options={[{ value: 'pref' as Level, label: tt('levelPref') }, { value: 'muni' as Level, label: tt('levelMuni'), title: tt('muniSince') }]} />
+          options={[{ value: 'pref' as View, label: tt('levelPref') },
+                    { value: 'muni' as View, label: tt('levelMuni'), title: tt('muniSince') },
+                    { value: 'bureau' as View, label: tt('levelBureau'), title: tt('levelBureauHint') }]} />
       </div>
       <div class="field grow">
         <MultiSelect label={tt('nationality')} placeholder={tt('all')} items={natPicker} selected={app.nat}
@@ -403,7 +451,7 @@
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M4.5 8h7M7 12h2" stroke="currentColor" stroke-width="1.6" /></svg>
         {tt('filters')}{#if hasFilters}<span class="count">{app.filterCount}</span>{/if}
       </button>
-      <span class="mperiod">{periodLabel(L, app.period)} · {app.level === 'pref' ? tt('levelPref') : tt('levelMuni')}</span>
+      <span class="mperiod">{periodLabel(L, app.period)} · {app.level === 'pref' ? tt('levelPref') : app.level === 'muni' ? tt('levelMuni') : tt('levelBureau')}</span>
     </div>
     <dialog class="sheet" bind:this={sheet} aria-label={tt('filters')} onclick={(e) => { if (e.target === sheet) sheet?.close(); }}>
       <div class="sheet-inner">
@@ -418,7 +466,7 @@
 
     <main id="main" class="grid" class:stale={loading}>
       <section class="readout" aria-live="polite">
-        {#if app.pref}
+        {#if app.level === 'bureau' ? app.bureau : app.pref}
           <nav class="crumbs" aria-label="breadcrumb">
             <button type="button" class="linkish" onclick={() => select(null)}>{tt('japan')}</button>
             {#if app.muni}
@@ -428,6 +476,24 @@
           </nav>
         {/if}
         <h2 class="place">{focusName}</h2>
+        {#if app.level === 'bureau' && app.bureau}
+          {@const bu = BUREAUS[app.bureau - 1]}
+          <div class="juris">
+            <span class="lbl">{tt('bureauPrefs')}</span>
+            <ul class="chips">
+              {#each bu.prefs as p (p)}
+                {@const br = bu.branches.find((x) => x.pref === p)}
+                <li><button type="button" class="chip" onclick={() => goPref(p)}>{prefName(p)}{#if br}<small>{br[L]}</small>{/if}</button></li>
+              {/each}
+            </ul>
+          </div>
+        {:else if app.level !== 'bureau' && app.pref}
+          {@const br = branchOfPref(app.pref)}
+          <p class="juris">
+            <span class="lbl">{tt('jurisdiction')}</span>
+            <button type="button" class="linkish" onclick={() => goBureau(bureauOfPref[app.pref])}>{BUREAUS[bureauOfPref[app.pref] - 1][L]}</button>{#if br}<span class="muted"> · {br[L]}</span>{/if}
+          </p>
+        {/if}
         {#if panel}
           <p class="hero tnum">{fmtInt(L, panel.total)}<span class="unit">{L === 'ja' ? '人' : ''}</span></p>
           <p class="facts">
@@ -468,6 +534,13 @@
             <Segmented label={tt('map') + ' / ' + tt('table')} value={app.view} onchange={(v) => (app.view = v)}
               options={[{ value: 'map' as 'map' | 'table', label: tt('map') }, { value: 'table' as 'map' | 'table', label: tt('table') }]} />
             <Segmented label={tt('metric')} value={app.metric} onchange={(v) => (app.metric = v)} options={metricOptions} />
+            {#if app.level !== 'bureau' && app.view === 'map'}
+              <button type="button" class="btn toggle" aria-pressed={app.showBureaus} title={tt('showBureausHint')}
+                onclick={() => (app.showBureaus = !app.showBureaus)}>
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M1.5 3.5 5 2l4 1.5L12.5 2v8.5L9 12l-4-1.5-3.5 1.5z M5 2v8.5 M9 3.5V12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
+                {tt('showBureaus')}
+              </button>
+            {/if}
           </div>
           {#if app.view === 'map'}
             <div class="search"><PlaceSearch {places} lang={L} onpick={pickPlace} /></div>
@@ -477,9 +550,9 @@
         {#if app.view === 'map'}
           <div class="mapwrap">
             <MapView {geo} level={app.level} areas={areaMap} {classes} metric={app.metric} lang={L}
-              focusCode={app.level === 'muni' ? (app.muni ? meta.muni[app.muni - 1]?.code ?? null : app.pref ? String(app.pref).padStart(2, '0') : null) : (app.pref ? String(app.pref).padStart(2, '0') : null)}
-              zoomTo={app.level === 'muni' && app.pref ? String(app.pref).padStart(2, '0') : null}
-              {highlight} onselect={select} />
+              {focusCode}
+              zoomTo={app.level === 'muni' && app.pref ? prefCode(app.pref) : null}
+              {highlight} onselect={select} showBureaus={app.showBureaus} />
             <div class="legend-box">
               <Legend {classes} metric={app.metric} lang={L} level={app.level}
                 showHidden={app.level === 'muni'} bind:highlight />
@@ -489,9 +562,8 @@
             </div>
           </div>
         {:else}
-          <RegionTable areas={areas.filter((a) => app.level === 'pref' || !app.pref || a.prefIdx === app.pref)}
-            lang={L} level={app.level} metric={app.metric}
-            focusCode={app.level === 'muni' && app.muni ? meta.muni[app.muni - 1]?.code ?? null : app.pref ? String(app.pref).padStart(2, '0') : null}
+          <RegionTable areas={areas.filter((a) => app.level !== 'muni' || !app.pref || a.prefIdx === app.pref)}
+            lang={L} level={app.level} metric={app.metric} {focusCode}
             onselect={select} />
         {/if}
 
@@ -500,7 +572,8 @@
           {#if muniAgeSexMissing}<p>{tt('noAgeSexMuni')}</p>{/if}
           {#if pooledPeriod}<p>{tt('otherMuniNote')}</p>{/if}
           {#if app.level === 'muni' && app.period === '2023-12'}<p>{tt('hamamatsuNote')}</p>{/if}
-          {#if app.level === 'pref'}<p>{tt('legendNote')}</p>{/if}
+          {#if app.level !== 'muni'}<p>{tt('legendNote')}</p>{/if}
+          {#if app.level === 'bureau' || app.showBureaus}<p>{tt('bureauNote')}</p>{/if}
           {#if app.metric === 'per1000'}<p>{tt('popNote')}</p>{/if}
         </div>
 
@@ -600,6 +673,17 @@
   .place { margin: 4px 0 0; font-size: 20px; font-weight: 600; }
   .hero { margin: 2px 0 0; font-size: clamp(40px, 5vw, 60px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.05; font-variant-numeric: normal; }
   .unit { font-size: 0.4em; margin-left: 4px; font-weight: 500; color: var(--ink-2); }
+  .juris { margin: 6px 0 10px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+  .juris .lbl { font-size: 12px; color: var(--muted); }
+  .chips { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+  .chip {
+    border: 1px solid var(--line-strong); background: var(--surface); border-radius: 999px;
+    padding: 3px 10px; font-size: 12.5px; display: inline-flex; gap: 6px; align-items: baseline;
+  }
+  .chip:hover { border-color: var(--ink-2); }
+  .chip small { color: var(--muted); font-size: 11px; }
+  .toggle { min-height: 38px; font-size: 13.5px; }
+  .toggle[aria-pressed='true'] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 8px 0 0; font-size: 13.5px; color: var(--ink-2); }
   .facts strong { color: var(--ink); font-weight: 600; }
 
