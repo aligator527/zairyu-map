@@ -32,8 +32,8 @@ jobs:
     env:
       PY: python
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -45,7 +45,7 @@ jobs:
 
       # Downloaded xlsx files are cached between runs, so only new or
       # republished tables are fetched again.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         if: steps.check.outputs.changed == 'true' || inputs.force
         with:
           path: |
