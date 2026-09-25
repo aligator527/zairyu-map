@@ -1,0 +1,152 @@
+/* Design tokens. Light is the default; dark applies from the OS setting unless
+   the viewer picked a theme (data-theme on <html> always wins). */
+:root {
+  color-scheme: light;
+  /* Japanese traditional palette: 生成り (unbleached) paper, 墨 ink,
+     紅 crimson for data, 藍 indigo for selection and focus. */
+  --bg: #f6f3ec;
+  --surface: #fcfaf6;
+  --surface-2: #efebe2;
+  --ink: #1a1817;
+  --ink-2: #4a4540;
+  --muted: #6a645d;
+  --line: #e0dbd0;
+  --line-strong: #c7c0b3;
+  --brand: #bc002d;           /* 日の丸 red: brand mark only */
+  --accent: #2e5297;          /* 藍 indigo: focus + selection */
+  --accent-ink: #ffffff;
+  --accent-soft: #e2e8f4;
+  --land: #e8e3d8;            /* areas with no residents matching */
+  --hatch: #aaa294;
+  --sea: transparent;
+  --bar: #d42e3d;
+  --bar-muted: #f3cfcc;
+  --male: #2a78d6;
+  --female: #eb6834;
+  --shadow: 0 1px 2px rgb(26 24 23 / 0.06), 0 8px 24px rgb(26 24 23 / 0.08);
+  --radius: 10px;
+  --font: 'IBM Plex Sans JP', system-ui, -apple-system, 'Hiragino Sans', 'Yu Gothic UI', 'Segoe UI', sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #131211;
+    --surface: #1b1a19;
+    --surface-2: #242220;
+    --ink: #f3f0ea;
+    --ink-2: #cbc6bc;
+    --muted: #a39d93;
+    --line: #2f2d2a;
+    --line-strong: #47433e;
+    --brand: #e5484d;
+    --accent: #a5bfec;
+    --accent-ink: #0d1626;
+    --accent-soft: #1f2a40;
+    --land: #282624;
+    --hatch: #5f5a53;
+    --bar: #e2474f;
+    --bar-muted: #4a2427;
+    --male: #3987e5;
+    --female: #d95926;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px rgb(0 0 0 / 0.45);
+  }
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #131211;
+  --surface: #1b1a19;
+  --surface-2: #242220;
+  --ink: #f3f0ea;
+  --ink-2: #cbc6bc;
+  --muted: #a39d93;
+  --line: #2f2d2a;
+  --line-strong: #47433e;
+  --brand: #e5484d;
+  --accent: #a5bfec;
+  --accent-ink: #0d1626;
+  --accent-soft: #1f2a40;
+  --land: #282624;
+  --hatch: #5f5a53;
+  --bar: #e2474f;
+  --bar-muted: #4a2427;
+  --male: #3987e5;
+  --female: #d95926;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px rgb(0 0 0 / 0.45);
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  font-feature-settings: 'palt' 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+:lang(ja) body, :lang(ja) { line-break: strict; }
+
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0);
+  white-space: nowrap; border: 0;
+}
+
+.tnum { font-variant-numeric: tabular-nums; }
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+:lang(en) .eyebrow { text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Quiet buttons: hairline, no gradients. */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 14px;
+}
+.btn:hover { border-color: var(--ink-2); }
+.btn[aria-pressed='true'] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.ghost:hover { background: var(--surface-2); }
+
+.linkish {
+  border: 0; background: none; padding: 0;
+  color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px;
+  text-decoration-thickness: 1px; font-size: 13px;
+}
+.linkish:hover { color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+@media (forced-colors: active) {
+  .btn[aria-pressed='true'] { border: 2px solid CanvasText; }
+}

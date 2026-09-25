@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.playwright-mcp/
+# Large intermediate files: re-created by estat_crawler.py / build_*.py
+data/raw/
+data/interim/
+data/geo/
+data/*.csv.gz
+data/*.parquet
